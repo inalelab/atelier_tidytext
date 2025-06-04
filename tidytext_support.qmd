@@ -1,0 +1,720 @@
+---
+title: "Atelier TidyText - INA le lab"
+author: "Cassandra Gorin" 
+date: "04/01/2025" 
+format: html
+editor: visual
+---
+
+# ![](images/INAlelab-03.jpg)
+
+
+# Le lab INA
+
+-   Mise à disposition d’outils et de données
+
+-   Accompagnement méthodologique
+
+    -   Permanence
+
+    -   Sprint ou suivi (1-2 mois)
+
+    -   Projets en résidence (1 an)
+
+-   Animation scientifique
+
+    -   Ateliers
+
+    -   Séminaires
+
+# Le lab INA
+
+![](images/services_lab-01.jpg){fig-align="center"}
+
+# Les données
+
+-   Série télévisée Louis La Brocante (1998-2014)
+
+-   Pour chaque épisode:
+
+    -   Notice documentaire
+
+    -   Transcription Whisper
+
+-   Dictionnaire des codes et documentation
+
+# La fouille de texte
+
+-   Analyse de données non structurées
+
+-   Extraction d'informations
+
+-   Visualisation, détection de sujets récurrents, extraction d'inforamtions spécifiques, analyse de sentiments exprimés...
+
+# tidytext
+
+-   Une approche (un package) parmi d'autres
+
+-   Intégration au tidyverse
+
+    -   Travailler sur des données textuelles en gardant le format "usuel" avec lequel on traite, par exemple, des données d'enquêtes (le data frame)
+    -   Permet de réutiliser aisément des pipelines (par exemple de constitution de graphiques)
+
+-   Pré-traitement relativement aisé
+
+-   Widyr, extension permettant d'effectuer des tâches plus avancées
+
+# Mise en place de l'environnement de travail
+
+## Données et codes
+
+1.  Dézipper le dossier
+2.  Déposer le dossier dézippé dans un endroit qui vous convient
+3.  Copier le chemin
+4.  Compléter et exécuter la ligne de code suivante
+
+```{r working directory, results=F, warning=F, message = F, eval=F}
+
+setwd("CHEMIN") 
+```
+
+## Installation des packages utiles
+
+```{r installation package, results=F, warning=F, message = F, eval=F}
+
+install.packages("here",    
+                 "tidytext",    
+                 "widyr",            
+                 "stringi",           
+                 "stopwords",              
+                 "SnowballC",
+                 "wordcloud")  
+```
+
+## Appel des packages utiles
+
+```{r appel des packages, results=F, warning=F, message = F, eval=F}
+
+library(tidyverse)
+tidyverse_packages(include_self = TRUE) # packages inclus dans le tidyverse
+
+library(here) # faciliter l'import/ export/ la localisation des fichiers 
+
+library(tidytext) 
+library(widyr) # extension de tidytext pour les co-occurences
+
+library(stringi) # transformation/ normalization de texte: stri_trans_general
+library(stopwords) # dictionnaire de stopword"
+library(SnowballC) # stemmatization
+library(wordcloud) # nuage de mots
+
+```
+
+# Rappel sur le tidyverse
+
+-   Ensemble de packages avec un syntaxe cohérente
+
+-   Permet d'aborder un grand nombre de traitement courants dans R
+
+    -   Import, nettoyage/ manipulation des données, visualisation
+
+-   Données "tidy"
+
+    -   Chaque variable est une colonne
+
+    -   Chaque observation est une ligne
+
+    -   Chaque type d'observation est une table différente
+
+-   Système de "pipeline" (\|\> ou %\>%)
+
+    -   Enchainement d'opération sure un même objet de départ
+
+```{r exemple tidyverse, results=F, warning=F, message = F, eval=F}
+
+
+# on importe nos données qu'on stock dans un objet
+corpus_test <- read.csv(here("donnees", "llb_tidytext.csv")) %>% 
+  # on désélectionne une colonne
+  select(-X) %>%
+  # on crée la colonne annee_dif_plus_deux 
+  mutate(annee_dif_plus_deux = annee_dif + 2,
+         # on passe en minsucule plusieurs colonnes à la fois
+         across(c("ti","tidl"), ~ str_to_lower(.))) %>% 
+  # on selectionne les lignes pour lesquelles annee_dif > 2006
+  filter(annee_dif > 2006) %>%
+  # on groupe les données en fonction des annees 
+  group_by(annee_dif) %>%
+  # on realise la moyenne des épisodes par année
+  summarize(n_episodes = n())
+
+# on regarde notre objet
+View(corpus_test)
+
+# on efface l'objet pour ne pas encombrer notre environnement
+rm(corpus_test)
+```
+
+## Cheat Sheet
+
+[dplyr: manipulation de données](https://rstudio.github.io/cheatsheets/data-transformation.pdf)
+
+[tidyr: création de données "tidy"](https://rstudio.github.io/cheatsheets/tidyr.pdf)
+
+[stringr: traitement des chaines de caractères](https://evoldyn.gitlab.io/evomics-2018/ref-sheets/R_strings.pdf "lolo")
+
+[ggplot2: visualisation de données](https://rstudio.github.io/cheatsheets/data-visualization.pdf)
+
+# Les données
+
+```{r exploration, results=F, warning=F, message = F, eval=F}
+
+corpus <- read.csv(here("donnees", "llb_tidytext.csv")) %>% 
+  select(-X)
+
+View(corpus)
+
+```
+
+# Pré-processing du corpus
+
+## 1. Normalisation du texte
+
+Grâce aux fonctions de stringr, on supprime les caractères non pertinents (la ponctuation et les chifres), et on passe tout le texte en minuscule.
+
+```{r normalisation, results=F, warning=F, message = F, eval=F}
+corpus <- corpus %>%
+  mutate(transcription_cleaned = transcription %>%
+           str_replace_all('[:punct:]', " ") %>%
+           str_replace_all('[:digit:]', " ") %>%
+           str_to_lower())
+```
+
+## 2. Tokeniser
+
+-   Etape essentielle dans le traitement de corpus textuel
+-   Consiste à découper le texte en unité individuelle plus petites appellées tokens
+    -   Paragraphes, words, mots, en caractère....
+    -   Ces unités de base serviront à l'analyse ultérieurement
+-   Choix en accord avec les besoins d'analyses par la suite
+
+### Avec tidytext
+
+-   Création d'une nouvelle variable qui va contenir ce token
+    -   Une ligne par document -\> une ligne par token
+
+    -   Toujours sur un format data-frame
+
+    -   Conservation des metadonnées du corpus
+
+```{r tokenisation mots, results=F, warning=F, message = F, eval=F}
+
+?unnest_tokens
+
+
+token_words <- corpus %>%
+  unnest_tokens(output = word, 
+                input = transcription_cleaned, 
+                # choix de l'unité 
+                token = "words", 
+                # normalisation du texte
+                to_lower = T,
+                drop = T)
+
+View(token_words)
+# 403 643 mots
+
+compte <- token_words %>%
+  group_by(word) %>%
+  count(sort=T)
+
+View(compte)
+# 18 502 mots différents
+
+token_words %>% 
+  group_by(id_episode) %>%
+  count() %$%
+  mean(n)
+# 9173 mots par épisode en moyenne
+```
+
+-   Beaucoup de mots "poubelle"
+
+## 2. Suppression des stop words
+
+-   Fonction stopwords: listes de mots vides.
+
+-   Pas de prise en compte,du contexte
+
+    -   Un bel été
+
+```{r suppression stop words, results=F, warning=F, message = F, eval=F}
+
+stopwords <- tibble(mot = stopwords('fr', source="stopwords-iso")) %>%
+  rename(word = mot)
+
+# Tokeniser puis filter les stopwords
+token_words2 <- corpus %>%
+  unnest_tokens(output = word, 
+                input = transcription_cleaned, 
+                token = "words", 
+                # normalisation du texte
+                to_lower = T,
+                drop = T) %>%
+  # anti join: renvoie toutes les lignes de x qui ne sont pas présentes dans y
+  anti_join(stopwords)
+# 135 537 mots
+  
+
+
+
+compte2 <- token_words2 %>%
+  group_by(word) %>%
+  count(sort=T)
+# 16 083 mots différents
+```
+
+-   Particularité d'un corpus de transcriptions: les signes d'oralité
+
+```{r suppression de stop words 2, results=F, warning=F, message = F, eval=F}
+
+stopwords <- tibble(mot = c(stopwords('fr', source="stopwords-iso"), "oui", "allez", "ben", "ouais", "bonjour")) %>%
+  rename(word = mot)
+
+token_words2 <- corpus %>%
+  unnest_tokens(output = word, 
+                input = transcription_cleaned, 
+                token = "words", 
+                # normalisation du texte
+                to_lower = T,
+                drop = T) %>%
+  # anti join: renvoie toutes les lignes de x qui ne sont pas présentes dans y
+  anti_join(stopwords)
+# 129 709 mots
+
+
+# comptage de mots
+compte2 <- token_words2 %>%
+  group_by(word) %>%
+  count(sort=T)
+# ~ 16 078 mots différents
+```
+
+## 3. Traitement des formes dérivées
+
+"Veux" et "voulez", "voir" et "vois", etc: Pour réduire la variabilité des mots dans le texte et simplifier l'anlayse, on peut avoir envie qu'ils soit considérer comme le même mot. Il existe deux solutions:
+
+-   **La stemmatisation:** réduction d'un mot à sa racine ("stem"), parfois de manière approximative. Tendance à couper les suffixes des mots sans tenir compte du contexte grammatical.
+
+```{r stemmatisation, results=F, warning=F, message = F, eval=F}
+
+# Grace à la fonction wordStem, stemmatiser les mots
+token_words3 <- corpus %>%
+  unnest_tokens(output = word, 
+                input = transcription_cleaned, 
+                token = "words", 
+                # normalisation du texte
+                to_lower = T,
+                drop = T) %>%
+  anti_join(stopwords) %>% 
+  # package SnowbgallC: extraction de la racine de chaque mot
+  mutate(stem = wordStem(word, language = "fr"))
+# 129 709 stem
+
+
+compte3 <- token_words3 %>%
+  group_by(stem) %>%
+  count(sort=T)
+# 9330 stem différentes
+```
+
+"Faire" est transformé en "Fair", "Louis" en "Loui": les stem ne font pas forcément de sens et peuvent être difficile à lire.
+
+-   **La lemmatisation:**
+
+On va lemmatiser sur la base d'un dictionnaire, [Lexique](http://www.lexique.org/), qui fournit des informations pour 140 000 mots de la langue françaises, notamment les formes grammaticales, les lemme associés, ou la fréquence de chaque mots dans différents corpus ([documentation](http://www.lexique.org/?page_id=294)).
+
+Un mot peut avoir plusieurs lemme différents. Pour faciliter la jointure avec nos données, on va sélectionner la forme la plus fréquente dans le corpus de films.
+
+```{r lemmatisation, results=F, warning=F, message = F, eval=F}
+
+lexique <- read_xlsx(here("donnees", "Lexique383.xlsx")) %>%
+  as.data.frame() %>%
+  arrange(desc(freqfilms2)) %>%
+  group_by(ortho) %>% 
+  slice(1) %>%
+  select(ortho, lemme)
+
+
+token_words4 <- corpus %>%
+  unnest_tokens(output = word, 
+                input = transcription_cleaned, 
+                token = "words", 
+                # normalisation du texte
+                #to_lower = F,
+                drop = T) %>%
+  anti_join(stopwords) %>%
+  # jointure avec la base lexique
+  left_join(lexique, by=c("word"="ortho")) %>% 
+  # si un mot n'a pas de lemme dans lexique, on conserve le mot
+  mutate(lemme = case_when(is.na(lemme) ~ word,
+                                 T ~ lemme)) 
+#129 709 lemme
+
+
+compte4 <- token_words4 %>%
+  group_by(lemme) %>%
+  count(sort=T) %>%
+  ungroup()
+# 10 163 lemme différents
+```
+
+-   Nettoyage: de \~400000 à \~130000 mots, et de \~18500 à \~10200 termes différents
+
+-   Possibilités d'utiliser d'autres méthodes de nettoyage
+
+# Premières analyses
+
+## 1. Fréquence des mots
+
+### Worldclouds
+
+Grâce à la fonction wordcloud, réaliser un worldcloud pour l'ensemble du corpus, puis pour un épisode au choix.
+
+```{r wordcloud, results=F, warning=F, message = F, eval=F}
+token_words4 %>%
+  count(lemme) %$%
+  wordcloud(lemme, n, max.words = 20)
+
+
+token_words4 %>%
+  filter(id_episode == "louis_lola_et_le_crocodile") %>%
+  count(lemme) %>%
+  with(wordcloud(lemme, n, max.words = 20))
+
+
+token_words4 %>%
+  filter(id_episode == "louis_et_les_momes") %>%
+  count(lemme) %>%
+  with(wordcloud(lemme, n, max.words = 20))
+```
+
+### Diagramme en barres
+
+Grâce à gg_plot (geom_col), réaliser un diagramme représentant la fréquence des mots les plus fréquents.
+
+```{r fréquence des mots, results=F, warning=F, message = F, eval=F}
+compte4 %>%
+  top_n(20, n) %>%
+  mutate(lemme = reorder(lemme, n)) %>%
+  ggplot(aes(lemme, n)) + 
+  geom_col() +
+  coord_flip() +
+  labs(x = NULL, 
+       y = NULL, 
+       caption = "Données: Transcription de la série télévisée Louis La Brocante") +
+  theme_bw()
+```
+
+### Diagramme en barres faceté
+
+```{r diagramme barre , results=F, warning=F, message = F, eval=F}
+token_words4 %>%
+  filter(id_episode %in% c("louis_lola_et_le_crocodile", "louis_et_les_momes")) %>%
+  group_by(id_episode, lemme) %>%  # Groupe: épisode et lemme
+  count(sort = TRUE) %>%  # Compte
+  ungroup() %>%
+  group_by(id_episode) %>%  # Groupe: id_episode (pour le facetage)
+  slice_max(n, n = 20) %>%  # 20 top mots par épisode
+  ungroup() %>%
+  ggplot(aes(reorder_within(lemme, n, id_episode), n)) + 
+  geom_col() +  # diagramme en barre
+  scale_x_reordered() + 
+  coord_flip() +
+  labs(x = NULL, 
+       y = NULL, 
+       caption = "Données: Transcription de la série télévisée Louis La Brocante") +
+  scale_y_reordered() +
+  facet_wrap(~ id_episode, scales = "free_y") +  # facetage: deux graphes côtes à côtes
+  theme_bw()
+
+
+```
+
+## TF-IDF
+
+```{r compte par documents et fréquence, results=F, warning=F, message = F, eval=F}
+token_words4%>%
+  group_by(lemme) %>%
+  summarize(n_doc = n_distinct(id_episode),
+            n_freq = n()) %>%
+  View()
+```
+
+-   Limites des analyses précédentes: pas de prise en compte de la distribution des mots dans chaque document (en terme d'effectif mais aussi de présence)
+
+-   TF-IDF (Term Fréquencyy - Inverse Document Frequency) pour déterminer les mots les plus représentatifs d'un document
+
+    -   TF: importance d'un mot dans un document spécifique
+
+    -   IDF: Rareté dans l'ensemble du corpus
+
+$$
+TF-IDF_{mot} = Freq_{\text{ mot, document}} \times \log \frac{N_{\text{ documents}}}{N_{\text{mot in document}}}
+$$
+
+```{r tf-idf, results=F, warning=F, message = F, eval=F}
+tf_idf <- token_words4 %>%
+  group_by(id_episode, lemme) %>%
+  summarize(n = n()) %>%
+  bind_tf_idf(lemme, id_episode, n)
+  
+```
+
+Représentation graphique du TF-IDF:
+
+```{r tf-idf plot, results=F, warning=F, message = F, eval=F}
+tf_idf %>%
+  filter(id_episode %in% c("louis_lola_et_le_crocodile", "louis_et_les_momes")) %>%
+  group_by(id_episode) %>%  # Group by id_episode (to keep facet separate)
+  slice_max(tf_idf, n = 30) %>% 
+  ungroup() %>%
+  mutate(lemme = reorder(lemme, tf_idf)) %>% 
+  ggplot(aes(tf_idf, lemme, fill = id_episode)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~id_episode, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL)
+```
+
+# Relations entre les mots
+
+-   Quel mot ont tendance à suivre immédiatement un autre?
+
+    -   Tokeniser par "ngram" c'est à dire par n mots consécutifs.
+
+-   A l'aide de la fonction unnest_tokens, tokeniser par bigrams (ngrams de deux mots). Réalisez les mêmes opérations de nettoyage que précédemment.
+
+```{r bigram, results=F, warning=F, message = F, eval=F}
+token_bigrams <- corpus %>%
+  unnest_tokens(output = bigram, 
+                input = transcription_cleaned, 
+                # choix de l'unité 
+                token = "ngrams", 
+                n = 2,
+                # normalisation du texte
+                to_lower = T,
+                drop = T)
+
+# 436396
+
+token_bigrams %>%
+  group_by(bigram) %>%
+  count(sort=T) %>%
+  View()
+
+# 132 606
+
+# lemmatisation
+token_bigrams2 <- token_bigrams %>%
+  separate(bigram, 
+           remove = F, 
+           c("mot_1", "mot_2"), sep = " ") %>%
+  anti_join(stopwords, by=c("mot_1"="word")) %>%
+  anti_join(stopwords, by=c("mot_2"="word")) %>%
+  left_join(lexique, by=c("mot_1"="ortho")) %>%
+  rename(lemme_1 = lemme) %>%
+  left_join(lexique, by=c("mot_2"="ortho")) %>%  
+  rename(lemme_2 = lemme) %>%
+  mutate(lemme_1 = case_when(is.na(lemme_1) ~ mot_1,
+                             T ~lemme_1),
+         lemme_2 = case_when(is.na(lemme_2) ~ mot_2,
+                             T ~lemme_2), 
+         bigram_lemme = paste(lemme_1, lemme_2))
+# 210489
+
+token_bigrams2 %>%
+  group_by(mot_1, mot_2) %>%
+  count(sort=T) %>%
+  View()
+#15550
+
+token_bigrams2 %>%
+  group_by(lemme_1, lemme_2) %>%
+  count(sort=T) %>%
+  View()
+#14574
+
+```
+
+-   Spécificité des transcriptions:
+
+    -   "Hallucinations" de Whisper
+
+    -   "Erreurs" lors de la transcription: Maryvonne
+
+    -   Peut mériter nettoyage
+
+Comme précédement, on peut calculer et représenter graphiquement le tf-idf.
+
+```{r tfidf bigram, results=F, warning=F, message = F, eval=F}
+tf_idf_bigram <- token_bigrams2 %>%
+  group_by(id_episode, bigram_lemme) %>%
+  summarize(n = n()) %>%
+  bind_tf_idf(bigram_lemme, id_episode, n)
+
+
+tf_idf_bigram %>%
+  filter(id_episode %in% c("louis_lola_et_le_crocodile", "louis_et_les_momes")) %>%
+  group_by(id_episode) %>%  # Group by id_episode (to keep facet separate)
+  slice_max(tf_idf, n = 20) %>%
+  ungroup() %>%
+  mutate(bigram_lemme = reorder(bigram_lemme, tf_idf)) %>% 
+  ggplot(aes(tf_idf, bigram_lemme, fill = id_episode)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~id_episode, ncol = 2, scales = "free") +
+  labs(x = "tf-idf", y = NULL)
+
+```
+
+# Analyse de co-occurences
+
+-   Co-occurence de mots qui ne sont pas côte à côté, dans un contexte plus large
+
+    -   Utilisation de widyr
+
+-   Identification des blocs
+
+    -   Ici, bloc de 10 phrases mais pas recommandé
+
+```{r bloc fonction , results=F, warning=F, message = F, eval=F}
+
+# fonction qui permet de séparer nos trnascriptions en blocs de 10 phrases
+bloc_n_phrases <- function(transcription, num_sentences_per_block = 40) {
+  # Appliquer la fonction à chaque élément du vecteur A
+  result <- map(transcription, function(text) {
+    # Diviser le texte en phrases (en utilisant un point comme séparateur)
+    sentences <- unlist(strsplit(text, "(?<=\\.)", perl = TRUE))
+    # Retirer les éléments vides
+    sentences <- sentences[sentences != ""]
+    # Diviser les phrases en blocs de 10
+    sentence_blocks <- split(sentences, ceiling(seq_along(sentences) / num_sentences_per_block))
+    # Retourner chaque bloc comme un vecteur de texte 
+    return(map(sentence_blocks, ~paste(.x, collapse = " ")))
+  })
+  
+  return(result)
+}
+```
+
+-   Retour sur le nettoyage effectué plus tôt
+
+    -   Pour déterminer les blocs, on a besoin des points
+
+```{r bloc, results=F, warning=F, message = F, eval=F}
+
+corpus <- corpus %>% 
+  mutate(transcription_cleaned_phrase = transcription %>%
+           str_replace_all("'", " ") %>%
+           str_replace_all('[:digit:]', " "))
+
+
+token_bloc <- corpus %>%
+  # tokenisation par bloc
+  unnest_tokens(output = bloc_10, 
+                input = transcription_cleaned_phrase, 
+                token = bloc_n_phrases) %>%
+  # création d'un id de bloc au sein de chaque épisode
+  group_by(id_episode) %>% 
+  mutate(id_bloc = row_number()) %>%
+  ungroup() %>%
+  # tokenisation par mot
+  unnest_tokens(output = word, input = bloc_10, token = "words") %>%
+  # creation d'un id de bloc global
+  mutate(id_section = paste0(id_episode, "_", id_bloc)) %>%
+  # nettoyage: stopwords et lemmatisation
+  anti_join(stopwords) %>%
+  left_join(lexique, by=c("word"="ortho")) %>%
+  mutate(lemme = case_when(is.na(lemme) ~ word,
+                           T ~lemme)) 
+```
+
+-   Grâce à la fonction pairwise_count, on peut compter les paires qui co-apparaissent:
+
+```{r pairs  count, results=F, warning=F, message = F, eval=F}
+
+word_pairs <- token_bloc  %>%
+  pairwise_count(lemme, id_section, sort = TRUE)
+
+
+
+word_pairs_clean <- word_pairs %>%
+  mutate(item1_alpha = case_when(item1 < item2 ~ item1, T ~ item2),
+         item2_alpha = case_when(item1 > item2 ~ item1, T ~ item2)) %>%
+  group_by(item1_alpha, item2_alpha) %>%
+  slice(1) %>%
+  ungroup()
+
+word_pairs_clean %>%
+  select(5,4,3) %>% View()
+
+# Chaque paire apparait en double : on peut nettoyer 
+
+word_pairs_clean <- word_pairs %>%
+  mutate(item1_alpha = case_when(item1 < item2 ~ item1, T ~ item2),
+         item2_alpha = case_when(item1 > item2 ~ item1, T ~ item2)) %>%
+  group_by(item1_alpha, item2_alpha) %>%
+  slice(1) %>%
+  ungroup()
+
+
+```
+
+-   Les paires les plus communes sont composées de mots très communs
+
+    -   Plus intéressant: La corrélation entre deux mots.
+
+-   Grâce à la fonction word_cors, calculer la corrélation par paire de mots.
+
+```{r  pairs  cor, results=F, warning=F, message = F, eval=F}
+word_cors <- token_bloc %>%
+  group_by(lemme) %>%
+  filter(n() >= 30) %>%
+  pairwise_cor(lemme, id_section, sort = TRUE)
+
+
+# Chaque paire apparait en double: on peut nettoyer
+word_cors_clean <- word_cors %>%
+  mutate(item1_alpha = case_when(item1 < item2 ~ item1, T ~ item2),
+         item2_alpha = case_when(item1 > item2 ~ item1, T ~ item2)) %>%
+  group_by(item1_alpha, item2_alpha) %>%
+  slice(1) %>%
+  ungroup() %>%
+  arrange(-correlation)
+
+
+
+# Afficher les paires comprenant un mot de votre choix pour regarder les corrélation les plus fortes
+
+word_cors_clean %>%
+  filter(item1_alpha == "statue" | item2_alpha == "statue") %>%
+  View()
+
+```
+
+# Pistes d'analyses supplémentaires
+
+-   Croisement avec les métadonnées
+
+    -   Analyse de vocabulaire/ de la richesse lexicale en fonction des scénaristes
+
+    -   Comparaison d'épisodes en fonction des descripteurs: par exemple comparer les épisodes tagés "enquête de police" ou "enquête par investigation" ou "vol-infraction" et ceux qui ne le sont pas
+
+-   Evolution de la mention de certains personnages au fil des épisodes et les co-occurences correspondantes
+
+-   Sentiment analysis sur les mots (dictionnaire sentiments et fonction get_sentiments de tidytext)
+
+# Prochains évènements
+
+-   [Ateliers](https://inalelab.hypotheses.org/ateliers): Scattertext, Sentiment Analysis
+
+-   [Séminaire:](https://inalelab.hypotheses.org/seminaires/2024-2025) 16 Mai 2025: Médias, genre et parité
